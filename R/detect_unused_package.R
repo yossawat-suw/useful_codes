@@ -21,21 +21,35 @@ detect_unused_packages <- function(script_path = NULL, packages = NULL) {
     packages <- names(sessionInfo()$otherPkgs)
   }
   
-  # Function to check if any function from a package is used in the script
   is_package_used <- function(pkg) {
     if (!requireNamespace(pkg, quietly = TRUE)) return(FALSE)
-    
+  
     # Get all functions in the package
     pkg_functions <- ls(paste0("package:", pkg), all.names = TRUE)
-    
+  
     # Escape special characters for regex
     pkg_functions_escaped <- gsub("([][{}()^$.|*+?\\])", "\\\\\\1", pkg_functions)
-    
+  
+    # Patterns to detect indirect function calls
+    patterns <- c(
+      paste0("\\b", pkg, "::"),                          # Direct usage: dplyr::filter()
+      paste0("library\\(\\s*[\"']?", pkg, "[\"']?\\)"),  # library(dplyr)
+      paste0("require\\(\\s*[\"']?", pkg, "[\"']?\\)"),  # require(dplyr)
+      paste0("p_load\\(.*?", pkg),                       # pacman::p_load(dplyr)
+      paste0("do.call\\(\\s*[\"']?", pkg, "[\"']?"),     # do.call("dplyr::filter", ...)
+      paste0("get\\(\\s*[\"']?", pkg, "[\"']?"),         # get("filter", envir = asNamespace("dplyr"))
+      "eval\\s*\\(\\s*parse\\(",                         # eval(parse(text = "dplyr::filter(...)"))
+      "match.fun\\(\\s*[\"']?.*?[\"']?\\)",              # match.fun("filter")
+      "lapply\\(.*?, function\\(.*?\\)",                 # lapply(c("filter"), function(f) dplyr::f())
+      "list\\(.*?=.*?::.*?\\)"                           # list(select = dplyr::select)
+    )
+  
     # Check if any function from the package is used in the script
     any(sapply(pkg_functions_escaped, function(fn) {
-      any(grepl(paste0("\\b", fn, "\\s*\\("), script_text))  # Look for function calls
-    }))
+      any(grepl(paste0("\\b", fn, "\\s*\\("), script_text))
+    })) || any(sapply(patterns, function(pattern) grepl(pattern, script_text)))
   }
+
   
   # Identify unused packages
   unused_packages <- packages[!sapply(packages, is_package_used)]
